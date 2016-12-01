@@ -17,11 +17,21 @@ import random
 import json
 import os
 import pkg_resources
-
+from plone.app.layout.navigation.root import getNavigationRootObject
 from zope.contentprovider.interfaces import IContentProvider
 from plone.event.interfaces import IEvent
 from zope.component import getMultiAdapter
+from Acquisition import aq_inner
+from Acquisition import aq_parent
+from plone.app.layout.navigation.interfaces import INavigationRoot
+from Products.CMFCore.interfaces._content import IFolderish
+from Products.CMFPlone.interfaces.siteroot import IPloneSiteRoot
+from zope.i18n import translate
+from plone.portlets.interfaces import IPortletAssignmentMapping
+from Acquisition.interfaces import IAcquirer
 
+from zope.i18nmessageid import MessageFactory
+PMF = MessageFactory('plone')
 
 class IBreadcrumbsPortlet(IPortletDataProvider):
     """A portlet which renders the results of a collection object.
@@ -46,15 +56,6 @@ class Assignment(base.Assignment):
 
     def __init__(self, header=u""):
         self.header = header
-        self.portal_state = getMultiAdapter((self.context, self.request),
-                                            name=u'plone_portal_state')
-        self.is_rtl = self.portal_state.is_rtl()
-
-        breadcrumbs_view = getMultiAdapter((self.context, self.request),
-                                           name='breadcrumbs_view')
-        
-        self.navigation_root_url = self.portal_state.navigation_root_url()
-        self.breadcrumbs = breadcrumbs_view.breadcrumbs()
 
     @property
     def title(self):
@@ -72,13 +73,49 @@ class Renderer(base.Renderer):
     def __init__(self, *args):
         base.Renderer.__init__(self, *args)
 
+        self.portal_state = getMultiAdapter((self.context, self.request),
+                                            name=u'plone_portal_state')
+        self.is_rtl = self.portal_state.is_rtl()
+
+        breadcrumbs_view = getMultiAdapter((self.context, self.request),
+                                           name='breadcrumbs_view')
+        
+        self.navigation_root_url = self.portal_state.navigation_root_url()
+        self.breadcrumbs = breadcrumbs_view.breadcrumbs()
+
+        self.assignment_context = self.get_assignment_context()
+        
+    
+    def get_assignment_context(self):
+        # this is odd... should be much more straightforward?
+        # also, this is pretty slow.
+        manager = self.manager
+        context = self.context
+        assignment = self.data
+
+        allAss = []
+        while not assignment in allAss:
+            pam = getMultiAdapter((context, manager), IPortletAssignmentMapping)
+            allAss = pam.values()
+            if assignment in allAss:
+                break
+
+            if IAcquirer.providedBy(context):
+                context = aq_parent(aq_inner(context))
+            else:
+                context = context.__parent__
+
+        return context
+
+    def assignment_context_url(self):
+        return self.assignment_context.absolute_url()
+
+
     def css_class(self):
         header = self.data.header
         normalizer = getUtility(IIDNormalizer)
         return "portlet-breadcrumbs-%s" % normalizer.normalize(header)
 
-    def breadcrumbs(self):
-        return self.data.breadcrumbs
 
 
 class AddForm(base.AddForm):
